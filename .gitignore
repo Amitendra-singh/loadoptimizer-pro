@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# macOS
+.DS_Store
+
+# Large optional 4K HDRI — auto re-downloadable from Poly Haven; the 2K is committed
+assets/*_4k.hdr
+
+# Render outputs & runtime artifacts (normally written to ../renders/)
+renders/
+*.png
+*.mp4
+report.json
+spec.json
+!docs/*.png

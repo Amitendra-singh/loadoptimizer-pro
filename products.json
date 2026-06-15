@@ -1,0 +1,14 @@
+{
+  "container": [5.0, 2.30, 2.20],
+  "quality": "balanced",
+  "resolution": [1400, 1050],
+  "views": ["hero", "top"],
+  "products": [
+    {"label": "fridge",    "l": 0.70, "w": 0.70, "h": 1.00, "count": 8,  "color": [0.30, 0.17, 0.08]},
+    {"label": "microwave", "l": 0.50, "w": 0.45, "h": 0.35, "count": 24, "color": [0.46, 0.30, 0.16]},
+    {"label": "parcel",    "l": 0.40, "w": 0.30, "h": 0.30, "count": 90, "color": [0.40, 0.25, 0.13]},
+    {"label": "flatpack",  "l": 1.20, "w": 0.20, "h": 0.70, "count": 16, "color": [0.33, 0.20, 0.10]},
+    {"label": "retail",    "l": 0.45, "w": 0.40, "h": 0.50, "count": 40, "color": [0.70, 0.68, 0.63]},
+    {"label": "blue",      "l": 0.50, "w": 0.50, "h": 0.34, "count": 24, "color": [0.10, 0.24, 0.46]}
+  ]
+}
