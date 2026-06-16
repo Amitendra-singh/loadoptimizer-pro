@@ -40,6 +40,11 @@ TRUCKS = {
 }
 TRUCK_ORDER = ["van", "box16", "box26", "cont20", "cont40", "trailer53"]
 
+# vehicle class: drivable box trucks vs units that need a tractor/chassis.
+_CLASS = {"van": "Box truck", "box16": "Box truck", "box26": "Box truck",
+          "trailer53": "Semi-trailer", "cont20": "Container", "cont40": "Container"}
+_CLASS_RANK = {"Box truck": 0, "Semi-trailer": 1, "Container": 2}
+
 
 def unit_weight(p):
     w = p.get("weight")
@@ -86,7 +91,8 @@ def analyze_truck(products, key, pack_eff=PACK_EFF):
     else:
         binding = "weight" if wt_pct > vol_pct else "cube"
     return {
-        "key": key, "name": t["name"], "style": t["style"], "feasible": feasible,
+        "key": key, "name": t["name"], "style": t["style"], "class": _CLASS[key],
+        "feasible": feasible,
         "trucks": n, "n_vol": n_vol, "n_wt": n_wt, "binding": binding,
         "vol_pct": vol_pct, "wt_pct": wt_pct,
         "payload_kg": t["payload_kg"], "volume_m3": round(tv, 1), "dims": t["dims"],
@@ -94,17 +100,21 @@ def analyze_truck(products, key, pack_eff=PACK_EFF):
 
 
 def recommend(products, pack_eff=PACK_EFF):
-    """Recommend the truck that carries the portfolio in the fewest vehicles, then
-    with the highest utilization of the binding resource (least wasted capacity)."""
+    """Rank vehicles and return a shortlist. Order: fewest trucks, then fullest on
+    the binding resource (in 10% bands so near-ties don't flip), then prefer a
+    drivable box truck over a semi/container, then the smallest capacity. This
+    avoids over-specifying a container when a box truck fits just as well."""
     vol, wt, units = portfolio_totals(products)
     rows = [analyze_truck(products, k, pack_eff) for k in TRUCK_ORDER]
     pool = [r for r in rows if r["feasible"]] or rows
 
-    def score(r):
-        bind_u = r["wt_pct"] if r["binding"] == "weight" else r["vol_pct"]
-        return (r["trucks"], -bind_u)
+    def fill_of(r):
+        return r["wt_pct"] if r["binding"] == "weight" else r["vol_pct"]
 
-    best = sorted(pool, key=score)[0]
+    ranked = sorted(pool, key=lambda r: (r["trucks"], -round(fill_of(r) / 10.0),
+                                         _CLASS_RANK[r["class"]], truck_volume(r["key"])))
+    shortlist = ranked[:3]
+    best = shortlist[0]
     if best["binding"] == "weight":
         reason = (f"Weight-out — payload is the limit ({best['wt_pct']}% of "
                   f"{best['payload_kg']:,} kg used; only {best['vol_pct']}% of the space).")
@@ -117,6 +127,7 @@ def recommend(products, pack_eff=PACK_EFF):
     return {
         "recommended": best["key"], "recommended_name": best["name"],
         "trucks": best["trucks"], "binding": label, "reason": reason,
+        "shortlist": shortlist,
         "totals": {"volume_m3": round(vol, 2), "weight_kg": round(wt, 1), "units": units},
         "rows": rows,
     }

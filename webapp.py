@@ -104,6 +104,20 @@ PAGE = r"""<!doctype html>
   .axname{font-size:13px}.axbar{height:16px;border-radius:6px;background:#eef1f6;border:1px solid var(--line);overflow:hidden}
   .axbar>i{display:block;height:100%}.axval{font-size:12px;color:var(--muted);text-align:right}
   .axmsg{margin-top:10px;font-size:13px}.axmsg.over{color:var(--warn)}.axmsg.warn{color:var(--amber)}.axmsg.ok{color:var(--good)}
+  .rec-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+  .rec-h b{font-size:15px}.hint2{color:var(--muted);font-size:12px}
+  .recopt{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+  .recopt.best{border-color:var(--accent);background:#f5f9ff}
+  .recopt-main{display:flex;justify-content:space-between;align-items:center}
+  .recopt-main b{font-size:14px}
+  .recopt-sub{color:var(--muted);font-size:12px;margin-top:4px}
+  .recbadge{font-size:10px;font-weight:600;background:var(--accent);color:#fff;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px;margin-left:8px}
+  .recopt-bars{display:flex;gap:18px;margin-top:10px}
+  .rb{display:flex;align-items:center;gap:8px;flex:1;font-size:12px;color:var(--muted)}
+  .rb .rbbar{flex:1;height:8px;border-radius:5px;background:#eef1f6;overflow:hidden}
+  .rb .rbbar>i{display:block;height:100%;background:var(--accent)}.rb .rbbar.wt>i{background:var(--amber)}
+  .recall{margin-top:6px}.recall summary{cursor:pointer;color:var(--accent);font-size:13px}
+  .seltruck{font-size:13px;color:var(--muted);margin:4px 0 12px}.seltruck b{color:var(--ink)}
 </style></head>
 <body>
 <header><div class="logo"><b>LO</b> LoadOptimizer <span style="font-weight:400">Pro</span></div>
@@ -188,23 +202,31 @@ function importCSV(file){if(!file)return;const rd=new FileReader();rd.onload=e=>
     return [c[ix('label')]||'sku',+c[ix('l')],+c[ix('w')],+c[ix('h')],+c[ix('count')],ix('weight')>=0?+c[ix('weight')]:0,col];});renderRows();};rd.readAsText(file);}
 function products(){return rows.map(r=>({label:r[0],l:r[1],w:r[2],h:r[3],count:r[4],weight:r[5],color:hex2rgb(r[6])}));}
 
+function bpill(b){const c={cube:'cube',weight:'weight',even:'bal'}[b];
+  const t={cube:'cube-out',weight:'weight-out',even:'balanced'}[b];return `<span class="pill ${c}">${t}</span>`;}
 function recCard(rec){
-  const cls={'cube-out':'cube','weight-out':'weight','balanced':'bal'}[rec.binding]||'bal';
   const t=rec.totals;
-  const tbl=rec.rows.map(r=>{
-    const bcls={'cube':'cube','weight':'weight','even':'bal'}[r.binding];
-    const bl={'cube':'cube-out','weight':'weight-out','even':'balanced'}[r.binding];
-    return `<tr class="${r.key===rec.recommended?'best':''}"><td>${r.name}${r.feasible?'':' ⚠'}</td>
-      <td>${r.trucks}</td><td>${r.vol_pct}%</td><td>${r.wt_pct}%</td>
-      <td><span class="pill ${bcls}">${bl}</span></td></tr>`;}).join('');
+  const opts=rec.shortlist.map((s,i)=>`
+    <div class="recopt ${i===0?'best':''}">
+      <div class="recopt-main">
+        <div><b>${s.name}</b>${i===0?'<span class="recbadge">best fit</span>':''}
+          <div class="recopt-sub">${s.class} · ${s.trucks} truck${s.trucks>1?'s':''} · ${bpill(s.binding)}</div></div>
+        <button class="btn ghost" style="width:auto;padding:6px 12px" onclick="useTruck('${s.key}')">Use this</button></div>
+      <div class="recopt-bars">
+        <div class="rb"><span>Volume</span><div class="rbbar"><i style="width:${Math.min(100,s.vol_pct)}%"></i></div><span>${s.vol_pct}%</span></div>
+        <div class="rb"><span>Payload</span><div class="rbbar wt"><i style="width:${Math.min(100,s.wt_pct)}%"></i></div><span>${s.wt_pct}%</span></div>
+      </div></div>`).join('');
+  const tbl=rec.rows.map(r=>`<tr class="${r.key===rec.recommended?'best':''}">
+      <td>${r.name}${r.feasible?'':' ⚠'}</td><td>${r.class}</td><td>${r.trucks}</td>
+      <td>${r.vol_pct}%</td><td>${r.wt_pct}%</td><td>${bpill(r.binding)}</td></tr>`).join('');
   return `<div class="card rec">
-    <div class="h"><b>Recommended: ${rec.recommended_name}</b><span class="pill ${cls}">${rec.binding}</span>
-      <span style="color:var(--muted)">× ${rec.trucks} truck${rec.trucks>1?'s':''}</span>
-      <button class="btn ghost" style="width:auto;padding:5px 10px;margin-left:auto" onclick="useTruck('${rec.recommended}')">Use this</button></div>
-    <div class="reason">${rec.reason}</div>
-    <div class="hint">Portfolio: ${t.volume_m3} m³ · ${t.weight_kg.toLocaleString()} kg · ${t.units} units</div>
-    <table class="bd" style="margin-top:12px"><thead><tr><th>Vehicle</th><th>Trucks</th><th>Volume</th><th>Weight</th><th>Binds on</th></tr></thead><tbody>${tbl}</tbody></table>
-  </div>`;
+    <div class="rec-h"><b>Recommended vehicles for this shipment</b>
+      <span class="hint2">all ${t.units} units · ${t.volume_m3} m³ · ${t.weight_kg.toLocaleString()} kg</span></div>
+    ${opts}
+    <details class="recall"><summary>Compare all vehicles</summary>
+      <table class="bd" style="margin-top:8px"><thead><tr><th>Vehicle</th><th>Type</th><th>Trucks</th><th>Volume</th><th>Payload</th><th>Binds on</th></tr></thead><tbody>${tbl}</tbody></table>
+      <div class="hint">% is per truck across the number of trucks needed to ship the whole order.</div>
+    </details></div>`;
 }
 function useTruck(k){document.getElementById('truck').value=k;applyTruck();}
 
@@ -238,9 +260,11 @@ function renderResults(d,views,spec){
   const bd=(s.breakdown||[]).map((b,i)=>{const col=rgb2hex(...spec.products[i].color);
     return `<tr><td><span class="sw" style="background:${col}"></span>${b.label}</td><td>${b.requested}</td><td>${b.placed}</td>
       <td class="${b.left>0?'bad':'ok'}">${b.left>0?b.left:'✓ all'}</td></tr>`;}).join('');
+  const tname=(TRUCKMETA[spec.truck_key]||{}).name||'selected truck';
   document.getElementById('out').innerHTML=
     (d.recommendation?recCard(d.recommendation):'')+
-    `<div class="kpis">
+    `<div class="seltruck">On your selected vehicle — <b>${tname}</b> (one truck)</div>
+    <div class="kpis">
       <div class="card kpi good"><div class="n">${s.utilization}%</div><div class="l">Space utilized</div></div>
       <div class="card kpi"><div class="n">${s.wt_pct}%</div><div class="l">Payload used (${(s.weight_kg||0).toLocaleString()} kg)</div></div>
       <div class="card kpi"><div class="n">${s.placed}</div><div class="l">Units loaded</div></div>
