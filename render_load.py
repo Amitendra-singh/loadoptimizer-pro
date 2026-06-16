@@ -109,7 +109,7 @@ def main():
     if views:
         stats = truckpack.build(container=container, catalog=catalog,
                                 quality=quality, resolution=resolution,
-                                truck_style=truck_style)
+                                truck_style=truck_style, truck_key=truck_key)
         for v in views:
             truckpack.set_view(container, v)
             path = os.path.join(out_dir, f"load_{v}.png")

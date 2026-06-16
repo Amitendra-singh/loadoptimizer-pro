@@ -89,6 +89,21 @@ PAGE = r"""<!doctype html>
   .empty{height:60vh;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center}
   .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;margin:0 auto 14px}
   @keyframes s{to{transform:rotate(360deg)}}.hint{color:var(--muted);font-size:11px;margin-top:6px}
+  .axle{padding:18px;margin-bottom:18px}
+  .axtop{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .axtop b{font-size:14px}
+  .apill{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:.4px}
+  .apill.okp{background:#e1f5ee;color:#0f6e56}.apill.warnp{background:#faeeda;color:#854f0b}.apill.overp{background:#fcebeb;color:#a32d2d}
+  .cgwrap{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .cgend{font-size:11px;color:var(--muted);white-space:nowrap}
+  .cgbar{position:relative;flex:1;height:14px;border-radius:7px;background:#eef1f6;border:1px solid var(--line)}
+  .cgzone{position:absolute;left:38%;width:24%;top:0;bottom:0;background:#e1f5ee;border-left:1px dashed #1e9e62;border-right:1px dashed #1e9e62}
+  .cgmark{position:absolute;top:-4px;width:4px;height:22px;border-radius:2px;background:#0f1b2d;transform:translateX(-2px)}
+  .cgcap{font-size:12px;color:var(--muted);margin-bottom:14px}
+  .axrow{display:grid;grid-template-columns:130px 1fr 210px;gap:10px;align-items:center;margin-bottom:8px}
+  .axname{font-size:13px}.axbar{height:16px;border-radius:6px;background:#eef1f6;border:1px solid var(--line);overflow:hidden}
+  .axbar>i{display:block;height:100%}.axval{font-size:12px;color:var(--muted);text-align:right}
+  .axmsg{margin-top:10px;font-size:13px}.axmsg.over{color:var(--warn)}.axmsg.warn{color:var(--amber)}.axmsg.ok{color:var(--good)}
 </style></head>
 <body>
 <header><div class="logo"><b>LO</b> LoadOptimizer <span style="font-weight:400">Pro</span></div>
@@ -233,10 +248,28 @@ function renderResults(d,views,spec){
       <div class="bar wt"><i id="bw"></i><em>${s.wt_pct}% payload</em></div>
       ${fit?'':'<div class="hint" style="color:var(--warn)">⚠ '+s.leftover+" unit(s) left over — use the recommended vehicle above or split the shipment.</div>"}
     </div>
+    ${s.axle?renderAxle(s.axle):''}
     <div class="gallery">${media}</div>
     <div class="card" style="padding:4px 6px 6px"><table class="bd"><thead><tr><th>SKU</th><th>Requested</th><th>Loaded</th><th>Not loaded</th></tr></thead><tbody>${bd}</tbody></table></div>`;
   requestAnimationFrame(()=>{document.getElementById('bv').style.width=Math.min(100,s.utilization)+'%';
     document.getElementById('bw').style.width=Math.min(100,s.wt_pct||0)+'%';});
+}
+function renderAxle(a){
+  const pill={ok:'okp',warn:'warnp',over:'overp'}[a.status];
+  const pillt={ok:'within limits',warn:'check balance',over:'over limit'}[a.status];
+  const bar=o=>{const c=o.pct>100?'#d9534f':(o.pct>92?'#b9770e':'#1e9e62');
+    return `<div class="axrow"><div class="axname">${o.name}</div>
+      <div class="axbar"><i style="width:${Math.max(0,Math.min(100,o.pct))}%;background:${c}"></i></div>
+      <div class="axval">${o.kg.toLocaleString()} / ${o.limit.toLocaleString()} kg <b style="color:${c}">${o.pct}%</b></div></div>`;};
+  return `<div class="card axle">
+    <div class="axtop"><b>Axle weight distribution</b><span class="apill ${pill}">${pillt}</span></div>
+    <div class="cgwrap"><span class="cgend">Front · cab</span>
+      <div class="cgbar"><span class="cgzone"></span><span class="cgmark" style="left:${Math.max(0,Math.min(100,a.cg_pct))}%"></span></div>
+      <span class="cgend">Rear · door</span></div>
+    <div class="cgcap">Center of gravity at <b>${a.cg_pct}%</b> of bed length (green band = balanced zone)</div>
+    ${bar(a.front)}${bar(a.rear)}
+    <div class="axmsg ${a.status}">${a.message}</div>
+  </div>`;
 }
 initTrucks();
 </script></body></html>"""

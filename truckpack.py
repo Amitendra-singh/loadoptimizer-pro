@@ -21,7 +21,9 @@ KIT_DIR = "/Users/amitendrasinghthenua/blender-mcp/photoreal"
 if KIT_DIR not in sys.path:
     sys.path.insert(0, KIT_DIR)
 import scene_kit
+import truckspec
 importlib.reload(scene_kit)
+importlib.reload(truckspec)
 
 # Free CC0 warehouse HDRI (Poly Haven) - reproducible lighting without re-downloading
 _HDRI_4K = os.path.join(KIT_DIR, "assets", "empty_warehouse_01_4k.hdr")
@@ -515,12 +517,18 @@ def set_view(container, name="hero"):
 
 
 def build(container=DEFAULT_TRUCK, catalog=None, quality="balanced",
-          resolution=(1600, 1200), truck_body=True, truck_style="box"):
+          resolution=(1600, 1200), truck_body=True, truck_style="box", truck_key=None):
     """Full build: clean scene, pack, construct truck + cargo, set up shot. Returns stats."""
     catalog = catalog or DEFAULT_CATALOG
     scene_kit.reset_scene()
     placements, leftovers, stats = pack_best(container, catalog)
     stats["overlaps"] = len(verify_no_overlap(placements))
+    if truck_key:
+        wmap = {it["label"]: truckspec.unit_weight(it) for it in catalog}
+        items = [(p["x"] + p["l"] / 2.0, wmap.get(p["label"], 0.0)) for p in placements]
+        axle = truckspec.axle_loads(items, truck_key, container[0])
+        if axle:
+            stats["axle"] = axle
     build_truck_shell(container)
     place_boxes(placements, container)
     if truck_body:

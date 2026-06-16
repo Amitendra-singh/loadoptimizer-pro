@@ -15,13 +15,28 @@ PACK_EFF = 0.80           # realistic max volumetric fill for mixed cartons
 
 # Interior dims (m) and payload (kg) are real-world-representative figures.
 # 'style' selects the 3D body model: box (with cab) | container | trailer.
+# 'axle' models the chassis as a 2-support beam in cargo-relative coords
+# (x=0 = front of cargo behind the cab, x=L = rear door). front_x can be
+# negative (steer axle sits under the cab, ahead of the cargo).
 TRUCKS = {
-    "van":       {"name": "Cargo Van",        "dims": [3.00, 1.70, 1.80], "payload_kg": 1400,  "style": "box"},
-    "box16":     {"name": "Box Truck 16 ft",  "dims": [4.90, 2.40, 2.10], "payload_kg": 3000,  "style": "box"},
-    "box26":     {"name": "Box Truck 26 ft",  "dims": [7.90, 2.60, 2.70], "payload_kg": 5000,  "style": "box"},
-    "cont20":    {"name": "20 ft Container",  "dims": [5.90, 2.35, 2.39], "payload_kg": 21700, "style": "container"},
-    "cont40":    {"name": "40 ft Container",  "dims": [12.00, 2.35, 2.39], "payload_kg": 26500, "style": "container"},
-    "trailer53": {"name": "53 ft Trailer",    "dims": [16.10, 2.60, 2.90], "payload_kg": 21772, "style": "trailer"},
+    "van":       {"name": "Cargo Van",        "dims": [3.00, 1.70, 1.80], "payload_kg": 1400,  "style": "box",
+                  "axle": {"front_x": -0.6, "rear_x": 2.4, "front_limit_kg": 630, "rear_limit_kg": 1120,
+                           "front_name": "Steer axle", "rear_name": "Drive axle"}},
+    "box16":     {"name": "Box Truck 16 ft",  "dims": [4.90, 2.40, 2.10], "payload_kg": 3000,  "style": "box",
+                  "axle": {"front_x": -1.0, "rear_x": 3.9, "front_limit_kg": 1350, "rear_limit_kg": 2400,
+                           "front_name": "Steer axle", "rear_name": "Drive axle"}},
+    "box26":     {"name": "Box Truck 26 ft",  "dims": [7.90, 2.60, 2.70], "payload_kg": 5000,  "style": "box",
+                  "axle": {"front_x": -1.2, "rear_x": 6.7, "front_limit_kg": 2250, "rear_limit_kg": 4000,
+                           "front_name": "Steer axle", "rear_name": "Drive axle"}},
+    "cont20":    {"name": "20 ft Container",  "dims": [5.90, 2.35, 2.39], "payload_kg": 21700, "style": "container",
+                  "axle": {"front_x": 0.7, "rear_x": 4.8, "front_limit_kg": 14000, "rear_limit_kg": 15420,
+                           "front_name": "Kingpin (tractor)", "rear_name": "Trailer tandem"}},
+    "cont40":    {"name": "40 ft Container",  "dims": [12.00, 2.35, 2.39], "payload_kg": 26500, "style": "container",
+                  "axle": {"front_x": 1.0, "rear_x": 10.2, "front_limit_kg": 14000, "rear_limit_kg": 15420,
+                           "front_name": "Kingpin (tractor)", "rear_name": "Trailer tandem"}},
+    "trailer53": {"name": "53 ft Trailer",    "dims": [16.10, 2.60, 2.90], "payload_kg": 21772, "style": "trailer",
+                  "axle": {"front_x": 1.2, "rear_x": 13.0, "front_limit_kg": 14000, "rear_limit_kg": 15420,
+                           "front_name": "Kingpin (tractor)", "rear_name": "Trailer tandem"}},
 }
 TRUCK_ORDER = ["van", "box16", "box26", "cont20", "cont40", "trailer53"]
 
@@ -104,6 +119,48 @@ def recommend(products, pack_eff=PACK_EFF):
         "trucks": best["trucks"], "binding": label, "reason": reason,
         "totals": {"volume_m3": round(vol, 2), "weight_kg": round(wt, 1), "units": units},
         "rows": rows,
+    }
+
+
+def axle_loads(items, key, L):
+    """Static 2-support beam axle-load estimate.
+
+    items = [(center_x, weight_kg), ...] for every placed box.
+    Returns CG position (% of bed length), the payload carried by the front and
+    rear axle groups, % of each axle's limit, and a balance status. Simplified
+    planning model (payload contribution only) - verify against a scale for legal use.
+    """
+    t = TRUCKS.get(key, {})
+    ax = t.get("axle")
+    W = sum(w for _, w in items)
+    if not ax or W <= 0:
+        return None
+    fx, rx = ax["front_x"], ax["rear_x"]
+    span = rx - fx
+    cg = sum(cx * w for cx, w in items) / W
+    r_rear = sum(w * (cx - fx) for cx, w in items) / span    # moment about front support
+    r_front = W - r_rear
+    fl, rl = ax["front_limit_kg"], ax["rear_limit_kg"]
+    front_pct = round(100 * r_front / fl, 1) if fl else 0
+    rear_pct = round(100 * r_rear / rl, 1) if rl else 0
+    cg_pct = round(100 * cg / L, 1)
+
+    if r_front > fl:
+        status, msg = "over", ax["front_name"] + " overloaded — shift load toward the rear"
+    elif r_rear > rl:
+        status, msg = "over", ax["rear_name"] + " overloaded — shift load toward the front"
+    elif r_front < 0.08 * W or cg > rx:
+        status, msg = "warn", "Too rear-heavy — light steer axle; move weight forward"
+    elif front_pct > 92 or rear_pct > 92:
+        status, msg = "warn", "Approaching an axle limit"
+    else:
+        status, msg = "ok", "Axle loads balanced and within limits"
+
+    return {
+        "cg_pct": cg_pct,
+        "front": {"name": ax["front_name"], "kg": round(r_front), "limit": fl, "pct": front_pct},
+        "rear": {"name": ax["rear_name"], "kg": round(r_rear), "limit": rl, "pct": rear_pct},
+        "status": status, "message": msg,
     }
 
 
