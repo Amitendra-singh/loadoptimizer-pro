@@ -173,15 +173,38 @@ async function initTrucks(){
   const d=await (await fetch('/api/trucks')).json();
   TRUCKMETA=d.trucks; ORDER=d.order;
   const sel=document.getElementById('truck');
+  sel.innerHTML='<option value="best">★ Recommended (best fit)</option>';
   ORDER.forEach(k=>{const o=document.createElement('option');o.value=k;
     o.textContent=TRUCKMETA[k].name+'  ·  '+TRUCKMETA[k].payload_kg.toLocaleString()+' kg';sel.appendChild(o);});
   sel.value='box16'; applyTruck();
 }
-function applyTruck(){
-  const k=document.getElementById('truck').value, t=TRUCKMETA[k];
+async function applyTruck(){
+  const sel=document.getElementById('truck');
+  if(sel.value==='best'){
+    sel.disabled=true;
+    try{const rec=await (await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:products()})})).json();
+        lastRec=rec; sel.value=rec.recommended;}catch(e){}
+    sel.disabled=false;
+  }
+  const k=sel.value, t=TRUCKMETA[k]; if(!t) return;
   cl.value=t.dims[0]; cw.value=t.dims[1]; ch.value=t.dims[2];
   document.getElementById('payhint').textContent=
     'Payload '+t.payload_kg.toLocaleString()+' kg · volume '+(t.dims[0]*t.dims[1]*t.dims[2]).toFixed(1)+' m³';
+  if(lastRender) liveUpdate(k);   // recompute numbers live (no render) once we've rendered once
+}
+async function liveUpdate(k){
+  try{
+    const d=await (await fetch('/api/breakdown',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({truck_key:k,balance:document.getElementById('balance').checked,products:products()})})).json();
+    if(!d.ok) return;
+    const renderedKey=lastRender?lastRender.spec.truck_key:null, stale=(k!==renderedKey);
+    const synth={ok:true,stats:d.stats,recommendation:lastRec,stale:stale,
+      renderedName:renderedKey?(TRUCKMETA[renderedKey]||{}).name:'',
+      images:stale?{}:(lastRender?lastRender.d.images:{}),
+      video:stale?null:(lastRender?lastRender.d.video:null)};
+    const sp=Object.assign({},lastRender?lastRender.spec:{},{truck_key:k,products:products()});
+    renderResults(synth,lastRender?lastRender.views:[],sp);
+  }catch(e){}
 }
 const DEF=[
   ["pallet-box",0.60,0.50,0.55,30,25,"#5a3a1c"],["carton-M",0.45,0.40,0.40,60,12,"#7a512c"],
@@ -268,12 +291,13 @@ function renderDrill(d,key){
 }
 function useTruck(k){document.getElementById('truck').value=k;applyTruck();}
 
-let lastRender=null;
+let lastRender=null, lastRec=null;
 function backBar(){return '<button class="btn ghost" style="margin-bottom:14px;width:auto;padding:8px 16px" onclick="restoreRender()">← Back to the render &amp; all views</button>';}
 function restoreRender(){ if(lastRender){drillCache={};renderResults(lastRender.d,lastRender.views,lastRender.spec);} }
 async function analyze(){
   document.getElementById('out').innerHTML='<div class="empty"><div class="spin"></div></div>';
   const rec=await (await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:products()})})).json();
+  lastRec=rec;
   document.getElementById('out').innerHTML=(lastRender?backBar():'')+recCard(rec);
 }
 
@@ -288,7 +312,7 @@ async function optimize(){
   try{
     const d=await (await fetch('/api/pack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)})).json();
     if(!d.ok){document.getElementById('out').innerHTML='<div class="empty">Render failed<br><pre>'+(d.error||'')+'</pre></div>';}
-    else { lastRender={d:d,views:views,spec:spec}; drillCache={}; renderResults(d,views,spec); }
+    else { lastRender={d:d,views:views,spec:spec}; lastRec=d.recommendation; drillCache={}; renderResults(d,views,spec); }
   }catch(e){document.getElementById('out').innerHTML='<div class="empty">Error: '+e+'</div>';}
   go.disabled=false;go.textContent='Optimize & Render';
 }
@@ -302,9 +326,12 @@ function renderResults(d,views,spec){
     return `<tr><td><span class="sw" style="background:${col}"></span>${b.label}</td><td>${b.requested}</td><td>${b.placed}</td>
       <td class="${b.left>0?'bad':'ok'}">${b.left>0?b.left:'✓ all'}</td></tr>`;}).join('');
   const tname=(TRUCKMETA[spec.truck_key]||{}).name||'selected truck';
+  const galleryBlock=d.stale
+    ? `<div class="card" style="padding:16px 18px;color:var(--muted)">Live fit estimate for <b>${tname}</b> — numbers above are recomputed without rendering. The 3D views still show <b>${d.renderedName||'the last vehicle'}</b>. <button class="btn ghost" style="display:inline-block;width:auto;padding:6px 14px;margin-left:6px" onclick="optimize()">Render 3D views for ${tname}</button></div>`
+    : `<div class="gallery">${media}</div>`;
   document.getElementById('out').innerHTML=
     (d.recommendation?recCard(d.recommendation):'')+
-    `<div class="seltruck">On your selected vehicle — <b>${tname}</b> (one truck)</div>
+    `<div class="seltruck">On your selected vehicle — <b>${tname}</b>${d.stale?' · <span style="color:var(--amber)">live estimate</span>':' (one truck)'}</div>
     <div class="kpis">
       <div class="card kpi good"><div class="n">${s.utilization}%</div><div class="l">Space utilized</div></div>
       <div class="card kpi"><div class="n">${s.wt_pct}%</div><div class="l">Payload used (${(s.weight_kg||0).toLocaleString()} kg)</div></div>
@@ -317,7 +344,7 @@ function renderResults(d,views,spec){
       ${fit?'':'<div class="hint" style="color:var(--warn)">⚠ '+s.leftover+" unit(s) left over — use the recommended vehicle above or split the shipment.</div>"}
     </div>
     ${s.axle?renderAxle(s.axle):''}
-    <div class="gallery">${media}</div>
+    ${galleryBlock}
     <div class="card" style="padding:4px 6px 6px"><table class="bd"><thead><tr><th>SKU</th><th>Requested</th><th>Loaded</th><th>Not loaded</th></tr></thead><tbody>${bd}</tbody></table></div>`;
   requestAnimationFrame(()=>{document.getElementById('bv').style.width=Math.min(100,s.utilization)+'%';
     document.getElementById('bw').style.width=Math.min(100,s.wt_pct||0)+'%';});
