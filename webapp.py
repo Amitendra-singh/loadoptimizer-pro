@@ -128,7 +128,9 @@ PAGE = r"""<!doctype html>
         <label class="chip"><input type="checkbox" class="v" value="hero" checked>Truck hero</label>
         <label class="chip"><input type="checkbox" class="v" value="top" checked>Top plan</label>
         <label class="chip"><input type="checkbox" class="v" value="rear">Rear</label>
-        <label class="chip"><input type="checkbox" id="anim">🎬 Loading animation</label></div>
+        <label class="chip"><input type="checkbox" class="v" value="axle">Axle view</label>
+        <label class="chip"><input type="checkbox" id="anim">🎬 Loading animation</label>
+        <label class="chip"><input type="checkbox" id="balance">⚖ Balance axle load</label></div>
     </div>
     <div class="sec"><h3>Products</h3>
       <table class="products"><thead><tr><th>SKU</th><th>L</th><th>W</th><th>H</th><th>Qty</th><th>kg</th><th>Color</th><th></th></tr></thead>
@@ -216,6 +218,7 @@ async function optimize(){
   const views=[...document.querySelectorAll('.v:checked')].map(c=>c.value);
   const spec={container:[+cl.value,+cw.value,+ch.value],truck_key:document.getElementById('truck').value,
     quality:q.value,resolution:[1500,1050],views,animate:document.getElementById('anim').checked,
+    balance:document.getElementById('balance').checked,
     anim_resolution:[1280,720],stagger:2,products:products()};
   const go=document.getElementById('go');go.disabled=true;go.textContent='Rendering…';
   document.getElementById('out').innerHTML='<div class="empty"><div><div class="spin"></div>Optimizing pack &amp; path-tracing on the GPU…<br><small>first run boots Blender (~a few seconds)</small></div></div>';

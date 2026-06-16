@@ -94,6 +94,7 @@ def main():
     else:
         truck_style = spec.get("truck_style", "box")
         truck_key = truck_key or "box16"
+    balance = bool(spec.get("balance"))
     views = spec.get("views", [])
     if not views and not animate:
         views = ["hero"]
@@ -109,7 +110,8 @@ def main():
     if views:
         stats = truckpack.build(container=container, catalog=catalog,
                                 quality=quality, resolution=resolution,
-                                truck_style=truck_style, truck_key=truck_key)
+                                truck_style=truck_style, truck_key=truck_key,
+                                balance=balance)
         for v in views:
             truckpack.set_view(container, v)
             path = os.path.join(out_dir, f"load_{v}.png")

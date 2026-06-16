@@ -115,19 +115,21 @@ _PACK_STRATEGIES = {
 }
 
 
-def pack_best(container, catalog, strategies=("volume", "height", "footprint", "longest")):
+def pack_best(container, catalog, strategies=("volume", "height", "footprint", "longest"),
+              balance=False, target_x=None):
     """Try several loading strategies and keep the densest result (commercial packers
     do this). Returns (placements, leftovers, stats) for the best fill."""
     best = None
     for s in strategies:
-        pl, lo, st = pack_skyline(container, catalog, strategy=s)
+        pl, lo, st = pack_skyline(container, catalog, strategy=s,
+                                  balance=balance, target_x=target_x)
         if best is None or st["used_vol"] > best[2]["used_vol"]:
             best = (pl, lo, st)
     return best
 
 
 def pack_skyline(container, catalog, cell=0.04, flat_tol=0.02, allow_rotate=True,
-                 strategy="volume"):
+                 strategy="volume", balance=False, target_x=None):
     """3D height-map (skyline) packer: bottom-left-fill with stacking + yaw rotation.
 
     Boxes rest on whatever is below them and fill gaps, so it packs far tighter
@@ -141,8 +143,12 @@ def pack_skyline(container, catalog, cell=0.04, flat_tol=0.02, allow_rotate=True
 
     items = []
     for it in catalog:
+        wt = truckspec.unit_weight(it)
         for _ in range(it["count"]):
-            items.append({k: it[k] for k in ("l", "w", "h", "color", "label")})
+            d = {k: it[k] for k in ("l", "w", "h", "color", "label")}
+            d["weight"] = wt
+            items.append(d)
+    max_w = max((d["weight"] for d in items), default=1.0) or 1.0
     # ordering strategy (pack_best tries several and keeps the densest)
     items.sort(key=_PACK_STRATEGIES.get(strategy, _PACK_STRATEGIES["volume"]), reverse=True)
 
@@ -173,19 +179,30 @@ def pack_skyline(container, catalog, cell=0.04, flat_tol=0.02, allow_rotate=True
             valid = (M - m <= flat_tol) & (M + b["h"] <= H + 1e-9)
             if not valid.any():
                 continue
-            score = np.where(valid, M + bias_x[:ox] + bias_y[:, :oy], np.inf)
+            if balance and target_x is not None:
+                # bucket support height, then pull heavy boxes toward the balance
+                # point (target_x); light boxes barely care and fill around them
+                wn = b["weight"] / max_w
+                xc = np.arange(ox) * cx + lx / 2.0
+                penx = np.abs(xc - target_x)[:, None]
+                bucket = np.round(M / 0.08) * 0.08
+                score = np.where(valid, bucket + 0.012 * wn * penx
+                                 + 1e-4 * np.arange(ox)[:, None] + bias_y[:, :oy], np.inf)
+            else:
+                score = np.where(valid, M + bias_x[:ox] + bias_y[:, :oy], np.inf)
             idx = int(np.argmin(score))
             i, j = divmod(idx, oy)
             sup = float(M[i, j])
-            if best is None or sup < best[0] - 1e-9:
-                best = (sup, score[i, j], i, j, lx, wy, fx, fy)
+            sc = float(score[i, j])
+            if best is None or sc < best[0] - 1e-12:
+                best = (sc, sup, i, j, lx, wy, fx, fy)
         if best is None:
             leftovers.append(b)
             continue
-        sup, _, i, j, lx, wy, fx, fy = best
+        _, sup, i, j, lx, wy, fx, fy = best
         placements.append(dict(x=i * cx, y=j * cy, z=sup,
                                l=lx, w=wy, h=b["h"],
-                               color=b["color"], label=b["label"]))
+                               color=b["color"], label=b["label"], weight=b["weight"]))
         grid[i:i + fx, j:j + fy] = sup + b["h"]
 
     box_vol = sum(p["l"] * p["w"] * p["h"] for p in placements)
@@ -493,6 +510,50 @@ def build_truck_exterior(container, cab_len=2.0, clearance=1.0, wheel_r=0.46,
     return coll
 
 
+def add_axle_overlay(container, axle_stats, truck_key, clearance=1.0):
+    """Glowing 3D overlay of the axle analysis: a CG beam at the load's balance
+    point, a 'balanced zone' strip on the ground, and axle discs coloured by load.
+    Created hidden; set_view('axle') reveals it."""
+    L, W, H = container
+    ax = truckspec.TRUCKS[truck_key]["axle"]
+    cg_x = axle_stats["cg_pct"] / 100.0 * L
+    fl, rl = ax["front_limit_kg"], ax["rear_limit_kg"]
+    target_x = (rl * ax["rear_x"] + fl * ax["front_x"]) / (fl + rl)
+    coll = bpy.data.collections.new("AxleViz")
+    bpy.context.scene.collection.children.link(coll)
+
+    def put(o):
+        for c in o.users_collection:
+            c.objects.unlink(o)
+        coll.objects.link(o)
+        o.hide_render = o.hide_viewport = True
+
+    def glow(name, color, strength):
+        return scene_kit.make_material(name, base_color=color, roughness=0.4,
+                                       emission_color=color, emission_strength=strength)
+
+    top, z0 = H + 1.4, -clearance + 0.01
+    bpy.ops.mesh.primitive_cylinder_add(radius=0.045, depth=top + clearance,
+                                        location=(cg_x, W / 2.0, (top - clearance) / 2.0), vertices=20)
+    o = bpy.context.active_object; o.name = "CG_beam"
+    scene_kit.assign_material(o, glow("CGmat", (1.0, 0.85, 0.1), 4.0)); put(o)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.15, location=(cg_x, W / 2.0, top))
+    o = bpy.context.active_object; o.name = "CG_ball"
+    for p in o.data.polygons:
+        p.use_smooth = True
+    scene_kit.assign_material(o, glow("CGball", (1.0, 0.85, 0.1), 4.0)); put(o)
+    bz = _box("BalanceZone", target_x - 0.45, target_x + 0.45, -0.25, W + 0.25, z0, z0 + 0.015,
+              material=glow("BZmat", (0.12, 0.7, 0.35), 1.4)); put(bz)
+    for nm, axx, pct in (("FrontAxleDisc", ax["front_x"], axle_stats["front"]["pct"]),
+                         ("RearAxleDisc", ax["rear_x"], axle_stats["rear"]["pct"])):
+        col = (0.9, 0.2, 0.15) if pct > 100 else ((0.9, 0.6, 0.1) if pct > 92 else (0.2, 0.75, 0.4))
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.5, depth=0.05,
+                                            location=(axx, W / 2.0, z0 + 0.02), vertices=28)
+        o = bpy.context.active_object; o.name = nm
+        scene_kit.assign_material(o, glow(nm + "mat", col, 2.5)); put(o)
+    return coll
+
+
 def set_view(container, name="hero"):
     """Reposition the camera to a named viewpoint. 'top' hides the ceiling."""
     L, W, H = container
@@ -501,10 +562,17 @@ def set_view(container, name="hero"):
             bpy.data.objects.remove(o, do_unlink=True)
     ceiling = bpy.data.objects.get("Ceiling")
     if ceiling:
-        ceiling.hide_render = (name == "top")
+        ceiling.hide_render = (name in ("top", "axle"))
+    # axle overlay is visible only in the axle view
+    for o in bpy.data.objects:
+        if any(c.name == "AxleViz" for c in o.users_collection):
+            o.hide_render = (name != "axle")
     if name == "rear":
         cam = scene_kit.add_camera((L + 4.0, W * 0.5, 0.75),
                                    (0.2, W * 0.5, H * 0.5), lens=35)
+    elif name == "axle":
+        cam = scene_kit.add_camera((L + 4.8, W + 3.8, 2.9),
+                                   (L * 0.42, W * 0.5, 0.2), lens=42)
     elif name == "top":
         cam = scene_kit.add_camera((L * 0.5, W * 0.5, H + 6.0),
                                    (L * 0.5, W * 0.5, 0.0), lens=45)
@@ -517,15 +585,23 @@ def set_view(container, name="hero"):
 
 
 def build(container=DEFAULT_TRUCK, catalog=None, quality="balanced",
-          resolution=(1600, 1200), truck_body=True, truck_style="box", truck_key=None):
+          resolution=(1600, 1200), truck_body=True, truck_style="box", truck_key=None,
+          balance=False):
     """Full build: clean scene, pack, construct truck + cargo, set up shot. Returns stats."""
     catalog = catalog or DEFAULT_CATALOG
     scene_kit.reset_scene()
-    placements, leftovers, stats = pack_best(container, catalog)
+    # axle-balance target: CG x where front/rear axle utilization equalizes
+    target_x = None
+    if balance and truck_key and truck_key in truckspec.TRUCKS:
+        ax = truckspec.TRUCKS[truck_key].get("axle")
+        if ax:
+            fl, rl = ax["front_limit_kg"], ax["rear_limit_kg"]
+            target_x = (rl * ax["rear_x"] + fl * ax["front_x"]) / (fl + rl)
+    placements, leftovers, stats = pack_best(container, catalog,
+                                             balance=balance, target_x=target_x)
     stats["overlaps"] = len(verify_no_overlap(placements))
     if truck_key:
-        wmap = {it["label"]: truckspec.unit_weight(it) for it in catalog}
-        items = [(p["x"] + p["l"] / 2.0, wmap.get(p["label"], 0.0)) for p in placements]
+        items = [(p["x"] + p["l"] / 2.0, p.get("weight", 0.0)) for p in placements]
         axle = truckspec.axle_loads(items, truck_key, container[0])
         if axle:
             stats["axle"] = axle
@@ -533,6 +609,8 @@ def build(container=DEFAULT_TRUCK, catalog=None, quality="balanced",
     place_boxes(placements, container)
     if truck_body:
         build_truck_exterior(container, body_style=truck_style)
+    if stats.get("axle") and truck_key:
+        add_axle_overlay(container, stats["axle"], truck_key)
     setup_truck_shot(container, quality=quality, resolution=resolution)
     return stats
 
