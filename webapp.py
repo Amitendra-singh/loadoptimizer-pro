@@ -20,6 +20,7 @@ KIT = os.path.dirname(os.path.abspath(__file__))
 if KIT not in sys.path:
     sys.path.insert(0, KIT)
 import truckspec   # noqa: E402
+import packer      # noqa: E402
 
 BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
 DRIVER = os.path.join(KIT, "render_load.py")
@@ -118,6 +119,12 @@ PAGE = r"""<!doctype html>
   .rb .rbbar>i{display:block;height:100%;background:var(--accent)}.rb .rbbar.wt>i{background:var(--amber)}
   .recall{margin-top:6px}.recall summary{cursor:pointer;color:var(--accent);font-size:13px}
   .seltruck{font-size:13px;color:var(--muted);margin:4px 0 12px}.seltruck b{color:var(--ink)}
+  .recopt{cursor:pointer}.recopt:hover{border-color:var(--accent)}
+  table.bd tr.drow{cursor:pointer}table.bd tr.drow:hover{background:#eef5ff}
+  .drill{padding:16px 18px;margin-top:12px;border:1px solid var(--accent)!important}
+  .drill-h{display:flex;align-items:center;gap:10px;margin-bottom:12px}.drill-h b{font-size:14px}
+  .drillkpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;color:var(--muted)}
+  .lefthi{color:var(--warn)}
 </style></head>
 <body>
 <header><div class="logo"><b>LO</b> LoadOptimizer <span style="font-weight:400">Pro</span></div>
@@ -207,33 +214,67 @@ function bpill(b){const c={cube:'cube',weight:'weight',even:'bal'}[b];
 function recCard(rec){
   const t=rec.totals;
   const opts=rec.shortlist.map((s,i)=>`
-    <div class="recopt ${i===0?'best':''}">
+    <div class="recopt ${i===0?'best':''}" onclick="drillDown('${s.key}')">
       <div class="recopt-main">
         <div><b>${s.name}</b>${i===0?'<span class="recbadge">best fit</span>':''}
-          <div class="recopt-sub">${s.class} · ${s.trucks} truck${s.trucks>1?'s':''} · ${bpill(s.binding)}</div></div>
-        <button class="btn ghost" style="width:auto;padding:6px 12px" onclick="useTruck('${s.key}')">Use this</button></div>
+          <div class="recopt-sub">${s.class} · ${s.trucks} truck${s.trucks>1?'s':''} · ${bpill(s.binding)} · <span style="color:var(--accent)">view fit detail →</span></div></div>
+        <button class="btn ghost" style="width:auto;padding:6px 12px" onclick="event.stopPropagation();useTruck('${s.key}')">Use this</button></div>
       <div class="recopt-bars">
         <div class="rb"><span>Volume</span><div class="rbbar"><i style="width:${Math.min(100,s.vol_pct)}%"></i></div><span>${s.vol_pct}%</span></div>
         <div class="rb"><span>Payload</span><div class="rbbar wt"><i style="width:${Math.min(100,s.wt_pct)}%"></i></div><span>${s.wt_pct}%</span></div>
       </div></div>`).join('');
-  const tbl=rec.rows.map(r=>`<tr class="${r.key===rec.recommended?'best':''}">
+  const tbl=rec.rows.map(r=>`<tr class="drow ${r.key===rec.recommended?'best':''}" onclick="drillDown('${r.key}')">
       <td>${r.name}${r.feasible?'':' ⚠'}</td><td>${r.class}</td><td>${r.trucks}</td>
       <td>${r.vol_pct}%</td><td>${r.wt_pct}%</td><td>${bpill(r.binding)}</td></tr>`).join('');
   return `<div class="card rec">
     <div class="rec-h"><b>Recommended vehicles for this shipment</b>
       <span class="hint2">all ${t.units} units · ${t.volume_m3} m³ · ${t.weight_kg.toLocaleString()} kg</span></div>
     ${opts}
-    <details class="recall"><summary>Compare all vehicles</summary>
+    <details class="recall"><summary>Compare all vehicles — click any row for fit detail (no render)</summary>
       <table class="bd" style="margin-top:8px"><thead><tr><th>Vehicle</th><th>Type</th><th>Trucks</th><th>Volume</th><th>Payload</th><th>Binds on</th></tr></thead><tbody>${tbl}</tbody></table>
       <div class="hint">% is per truck across the number of trucks needed to ship the whole order.</div>
-    </details></div>`;
+    </details>
+    <div id="drillpanel"></div></div>`;
+}
+let drillCache={};
+function bpill2(b){const c=b==='weight-out'?'weight':(b==='cube-out'?'cube':'bal');return `<span class="pill ${c}">${b}</span>`;}
+async function drillDown(key){
+  let panel=document.getElementById('drillpanel'); if(!panel) return;
+  if(drillCache[key]){panel.innerHTML=renderDrill(drillCache[key],key);panel.scrollIntoView({behavior:'smooth',block:'nearest'});return;}
+  panel.innerHTML='<div class="card drill"><div class="spin"></div></div>';
+  try{
+    const d=await (await fetch('/api/breakdown',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({truck_key:key,balance:document.getElementById('balance').checked,products:products()})})).json();
+    if(!d.ok){panel.innerHTML='<div class="card drill" style="color:var(--warn)">Could not compute: '+(d.error||'')+'</div>';return;}
+    drillCache[key]=d; panel.innerHTML=renderDrill(d,key); panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){panel.innerHTML='<div class="card drill" style="color:var(--warn)">Error: '+e+'</div>';}
+}
+function renderDrill(d,key){
+  const s=d.stats,fit=s.leftover===0,ax=s.axle;
+  const rows=(s.breakdown||[]).map(b=>`<tr><td>${b.label}</td><td>${b.requested}</td><td>${b.placed}</td>
+    <td class="${b.left>0?'bad':'ok'}">${b.left>0?b.left:'✓ all'}</td></tr>`).join('');
+  return `<div class="card drill">
+    <div class="drill-h"><b>${d.truck_name} — fit detail</b><span class="hint2">computed without rendering</span>
+      <button class="x" style="margin-left:auto" onclick="document.getElementById('drillpanel').innerHTML=''">&times;</button></div>
+    <div class="drillkpi">
+      <span><b style="color:var(--good)">${s.utilization}%</b> volume</span>
+      <span><b style="color:var(--amber)">${s.wt_pct}%</b> payload</span>
+      <span>${bpill2(s.binding)}</span>
+      <span><b>${s.placed}</b> loaded · <b class="${fit?'':'lefthi'}">${s.leftover}</b> didn't fit</span>
+      ${ax?`<span>axle <b style="color:${ax.status==='ok'?'var(--good)':'var(--warn)'}">${ax.status}</b></span>`:''}</div>
+    <table class="bd"><thead><tr><th>SKU</th><th>Requested</th><th>Loaded</th><th>Didn't fit</th></tr></thead><tbody>${rows}</tbody></table>
+    <button class="btn ghost" style="margin-top:12px;width:auto;padding:7px 14px" onclick="useTruck('${key}')">Select this vehicle</button>
+  </div>`;
 }
 function useTruck(k){document.getElementById('truck').value=k;applyTruck();}
 
+let lastRender=null;
+function backBar(){return '<button class="btn ghost" style="margin-bottom:14px;width:auto;padding:8px 16px" onclick="restoreRender()">← Back to the render &amp; all views</button>';}
+function restoreRender(){ if(lastRender){drillCache={};renderResults(lastRender.d,lastRender.views,lastRender.spec);} }
 async function analyze(){
   document.getElementById('out').innerHTML='<div class="empty"><div class="spin"></div></div>';
   const rec=await (await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:products()})})).json();
-  document.getElementById('out').innerHTML=recCard(rec);
+  document.getElementById('out').innerHTML=(lastRender?backBar():'')+recCard(rec);
 }
 
 async function optimize(){
@@ -247,7 +288,7 @@ async function optimize(){
   try{
     const d=await (await fetch('/api/pack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(spec)})).json();
     if(!d.ok){document.getElementById('out').innerHTML='<div class="empty">Render failed<br><pre>'+(d.error||'')+'</pre></div>';}
-    else renderResults(d,views,spec);
+    else { lastRender={d:d,views:views,spec:spec}; drillCache={}; renderResults(d,views,spec); }
   }catch(e){document.getElementById('out').innerHTML='<div class="empty">Error: '+e+'</div>';}
   go.disabled=false;go.textContent='Optimize & Render';
 }
@@ -336,6 +377,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(n) or b"{}")
         if path == "/api/analyze":
             self._json(truckspec.recommend(body.get("products", [])))
+            return
+        if path == "/api/breakdown":
+            key = body.get("truck_key")
+            cont = (truckspec.TRUCKS[key]["dims"] if key in truckspec.TRUCKS
+                    else body.get("container"))
+            try:
+                _, stats = packer.load_stats(tuple(cont), body.get("products", []),
+                                             truck_key=key, balance=bool(body.get("balance")))
+                self._json({"ok": True, "stats": stats,
+                            "truck_name": truckspec.TRUCKS.get(key, {}).get("name", key)})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)})
             return
         if path != "/api/pack":
             self._send(404, "text/plain", b"not found")
