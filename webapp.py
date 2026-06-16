@@ -125,6 +125,15 @@ PAGE = r"""<!doctype html>
   .drill-h{display:flex;align-items:center;gap:10px;margin-bottom:12px}.drill-h b{font-size:14px}
   .drillkpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;color:var(--muted)}
   .lefthi{color:var(--warn)}
+  table.cmp{table-layout:fixed}
+  table.cmp td{vertical-align:top}
+  table.cmp td.whycell{font-size:12px;color:var(--muted);white-space:normal;line-height:1.45}
+  table.cmp th:nth-child(1),table.cmp td:nth-child(1){width:17%}
+  table.cmp th:nth-child(2),table.cmp td:nth-child(2){width:7%}
+  table.cmp th:nth-child(3),table.cmp td:nth-child(3){width:8%}
+  table.cmp th:nth-child(4),table.cmp td:nth-child(4){width:9%}
+  table.cmp th:nth-child(5),table.cmp td:nth-child(5){width:24%}
+  table.cmp th:nth-child(6),table.cmp td:nth-child(6){width:35%}
 </style></head>
 <body>
 <header><div class="logo"><b>LO</b> LoadOptimizer <span style="font-weight:400">Pro</span></div>
@@ -246,18 +255,36 @@ function recCard(rec){
         <div class="rb"><span>Volume</span><div class="rbbar"><i style="width:${Math.min(100,s.vol_pct)}%"></i></div><span>${s.vol_pct}%</span></div>
         <div class="rb"><span>Payload</span><div class="rbbar wt"><i style="width:${Math.min(100,s.wt_pct)}%"></i></div><span>${s.wt_pct}%</span></div>
       </div></div>`).join('');
-  const tbl=rec.rows.map(r=>`<tr class="drow ${r.key===rec.recommended?'best':''}" onclick="drillDown('${r.key}')">
-      <td>${r.name}${r.feasible?'':' ⚠'}</td><td>${r.class}</td><td>${r.trucks}</td>
-      <td>${r.vol_pct}%</td><td>${r.wt_pct}%</td><td>${bpill(r.binding)}</td></tr>`).join('');
   return `<div class="card rec">
     <div class="rec-h"><b>Recommended vehicles for this shipment</b>
       <span class="hint2">all ${t.units} units · ${t.volume_m3} m³ · ${t.weight_kg.toLocaleString()} kg</span></div>
     ${opts}
-    <details class="recall"><summary>Compare all vehicles — click any row for fit detail (no render)</summary>
-      <table class="bd" style="margin-top:8px"><thead><tr><th>Vehicle</th><th>Type</th><th>Trucks</th><th>Volume</th><th>Payload</th><th>Binds on</th></tr></thead><tbody>${tbl}</tbody></table>
-      <div class="hint">% is per truck across the number of trucks needed to ship the whole order.</div>
+    <details class="recall" ontoggle="if(this.open)loadCompare()">
+      <summary>Compare all vehicles — fit, axle balance &amp; why</summary>
+      <div id="comparebody"><div class="hint" style="padding:8px 2px">Open to compute fit + axle distribution for every vehicle (~3s, no render).</div></div>
     </details>
     <div id="drillpanel"></div></div>`;
+}
+async function loadCompare(){
+  const body=document.getElementById('comparebody'); if(!body||body.dataset.loaded==='1') return;
+  body.dataset.loaded='1';
+  body.innerHTML='<div class="spin" style="margin:14px auto"></div><div class="hint" style="text-align:center">Packing every vehicle…</div>';
+  try{
+    const d=await (await fetch('/api/compare',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({products:products(),balance:document.getElementById('balance').checked})})).json();
+    if(!d.ok){body.innerHTML='<div class="hint" style="color:var(--warn)">'+(d.error||'failed')+'</div>';body.dataset.loaded='';return;}
+    body.innerHTML=compareTable(d);
+  }catch(e){body.innerHTML='<div class="hint" style="color:var(--warn)">'+e+'</div>';body.dataset.loaded='';}
+}
+function compareTable(d){
+  const rows=d.rows.map(r=>{const ax=r.axle;
+    const axcell=ax?`<span class="apill ${ax.status==='over'?'overp':(ax.status==='warn'?'warnp':'okp')}">${ax.status==='over'?'over':(ax.status==='warn'?'check':'ok')}</span> <span class="hint2">CG ${ax.cg}% · S ${ax.steer}/D ${ax.drive}%</span>`:'—';
+    return `<tr class="drow ${r.key===d.recommended?'best':''}" onclick="drillDown('${r.key}')">
+      <td>${r.name}${r.feasible?'':' ⚠'}<div class="hint2">${r.class}</div></td>
+      <td>${r.trucks}</td><td>${r.vol_pct}%</td><td>${r.wt_pct}%</td>
+      <td>${axcell}</td><td class="whycell">${r.why}</td></tr>`;}).join('');
+  return `<table class="bd cmp" style="margin-top:8px"><thead><tr><th>Vehicle</th><th>Trucks</th><th>Vol</th><th>Payload</th><th>Axle balance</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="hint">Vol/Payload are per truck across the fleet needed; axle is for a representative single load. Click a row for full fit detail.</div>`;
 }
 let drillCache={};
 function bpill2(b){const c=b==='weight-out'?'weight':(b==='cube-out'?'cube':'bal');return `<span class="pill ${c}">${b}</span>`;}
@@ -404,6 +431,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(n) or b"{}")
         if path == "/api/analyze":
             self._json(truckspec.recommend(body.get("products", [])))
+            return
+        if path == "/api/compare":
+            try:
+                out = {"ok": True}
+                out.update(packer.compare_vehicles(body.get("products", []),
+                                                   bool(body.get("balance"))))
+                self._json(out)
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)})
             return
         if path == "/api/breakdown":
             key = body.get("truck_key")

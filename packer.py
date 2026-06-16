@@ -160,6 +160,62 @@ def balance_target_x(container, truck_key):
     return (rl * ax["rear_x"] + fl * ax["front_x"]) / (fl + rl)
 
 
+def _rationale(r, best_trucks, is_best):
+    """Plain-English reason a vehicle is / isn't a good choice for the load."""
+    if not r["feasible"]:
+        return "Won't fit — an item is larger than this vehicle's interior."
+    parts = []
+    if is_best:
+        parts.append("Recommended best fit")
+    if r["trucks"] > best_trucks:
+        parts.append(f"would need {r['trucks']} trucks vs {best_trucks} for the best option")
+    elif r["class"] == "Container" and r["wt_pct"] < 25 and r["vol_pct"] < 70:
+        parts.append("fits, but over-specified — an intermodal container is bigger than this load needs")
+    elif r["class"] == "Semi-trailer" and r["vol_pct"] < 35 and r["wt_pct"] < 35:
+        parts.append("fits, but a full trailer is oversized for this load")
+    elif not is_best:
+        parts.append(f"also carries it in {r['trucks']} truck(s) — a viable alternative")
+    parts.append(f"{r['vol_pct']}% volume / {r['wt_pct']}% payload, {r['binding']}")
+    ax = r.get("axle")
+    if ax and ax["status"] == "over":
+        parts.append("⚠ axle over legal limit at this load")
+    elif ax and ax["status"] == "warn":
+        parts.append("axle balance needs attention")
+    txt = "; ".join(parts)
+    return txt[0].upper() + txt[1:]
+
+
+def compare_vehicles(products, balance=False):
+    """Rich per-vehicle comparison: real packing fit + axle distribution + a
+    rationale for each vehicle. Fast (single-strategy pack per vehicle, ~0.4s)."""
+    rec = truckspec.recommend(products)
+    best_trucks = rec["shortlist"][0]["trucks"] if rec.get("shortlist") else 1
+
+    def fill_of(r):
+        return r["wt_pct"] if r["binding"] == "weight" else r["vol_pct"]
+
+    rows = sorted(rec["rows"], key=lambda r: (r["trucks"], -round(fill_of(r) / 10.0),
+                                              truckspec._CLASS_RANK[r["class"]],
+                                              truckspec.truck_volume(r["key"])))
+    for r in rows:
+        key = r["key"]
+        cont = tuple(truckspec.TRUCKS[key]["dims"])
+        try:
+            tx = balance_target_x(cont, key) if balance else None
+            pl, lo, st = pack_skyline(cont, products, strategy="volume",
+                                      balance=balance, target_x=tx)
+            items = [(p["x"] + p["l"] / 2.0, p.get("weight", 0.0)) for p in pl]
+            ax = truckspec.axle_loads(items, key, cont[0])
+            r["axle"] = ({"status": ax["status"], "cg": ax["cg_pct"],
+                          "steer": ax["front"]["pct"], "drive": ax["rear"]["pct"]}
+                         if ax else None)
+        except Exception:
+            r["axle"] = None
+        r["why"] = _rationale(r, best_trucks, key == rec["recommended"])
+    return {"rows": rows, "recommended": rec["recommended"],
+            "recommended_name": rec["recommended_name"], "totals": rec["totals"]}
+
+
 def load_stats(container, catalog, truck_key=None, balance=False):
     """Pack + full stats (breakdown, overlaps, weight, cube/weight-out, axle) with
     NO rendering. Returns (placements, stats). Used both by the Blender build and
