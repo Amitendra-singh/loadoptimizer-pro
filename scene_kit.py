@@ -113,7 +113,13 @@ def setup_render(quality="balanced", resolution=(1600, 1600), exposure=0.0,
     c.volume_bounces = 2
     c.caustics_reflective = False
     c.caustics_refractive = False
-    scene.render.use_persistent_data = True  # faster re-renders / animation
+    scene.render.use_persistent_data = False  # don't hold scene data resident (saves VRAM)
+    # Tile GPU rendering so peak Metal VRAM stays bounded on big scenes (prevents OOM)
+    try:
+        c.use_auto_tile = True
+        c.tile_size = 1024
+    except Exception:
+        pass
 
     # Film + output
     scene.render.film_transparent = transparent_film
@@ -369,7 +375,18 @@ def render_to(filepath, samples=None):
         scene.cycles.samples = samples
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     scene.render.filepath = filepath
-    bpy.ops.render.render(write_still=True)
+    try:
+        bpy.ops.render.render(write_still=True)
+    except RuntimeError as e:
+        msg = str(e)
+        # Metal GPU out-of-memory -> fall back to CPU and retry so the render completes
+        if any(k in msg for k in ("Memory", "Command buffer", "out of memory", "OutOfMemory")):
+            print("scene_kit: GPU render failed (%s); retrying on CPU"
+                  % msg.splitlines()[0])
+            scene.cycles.device = 'CPU'
+            bpy.ops.render.render(write_still=True)
+        else:
+            raise
     return filepath
 
 
