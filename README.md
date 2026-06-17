@@ -60,6 +60,12 @@ You (plain English / a product list)
 ```bash
 python3 webapp.py          # then open http://localhost:8765
 ```
+
+**Keep it always running** (macOS LaunchAgent — starts at login, auto-restarts if it dies):
+```bash
+./service.sh install       # then http://localhost:8765 is always up
+./service.sh status        # | restart | logs | uninstall
+```
 Pick a vehicle, edit the product table (dimensions, quantity, **kg**), and either
 **⚖ Recommend best truck** (instant, no render) or **Optimize & Render**.
 
