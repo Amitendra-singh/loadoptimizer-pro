@@ -17,7 +17,7 @@ import math
 import importlib
 import random
 
-KIT_DIR = "/Users/amitendrasinghthenua/blender-mcp/photoreal"
+KIT_DIR = os.path.dirname(os.path.abspath(__file__))
 if KIT_DIR not in sys.path:
     sys.path.insert(0, KIT_DIR)
 import scene_kit

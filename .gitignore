@@ -4,6 +4,14 @@ __pycache__/
 *.egg-info/
 .venv/
 
+# Secrets (never commit these)
+.env
+.env.*
+*.pem
+*.p12
+id_rsa
+id_rsa.pub
+
 # macOS
 .DS_Store
 
