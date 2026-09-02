@@ -1,5 +1,7 @@
 # LoadOptimizer Pro
 
+**Play the game:** [Load Bay](https://amitendra-singh.github.io/loadoptimizer-pro/) — cube-out or weight-out, in the browser. Open `index.html`. No build step.
+
 A photorealistic 3D **truck load-optimization** tool. Describe a product portfolio,
 and it packs it into a vehicle with a 3D bin-packing engine, tells you whether you'll
 **cube-out or weight-out**, **recommends the best truck**, and renders the result —
@@ -23,6 +25,12 @@ You (plain English / a product list)
         ▼
   photoreal renders + utilization/payload report
 ```
+
+## Play Load Bay
+
+Open `index.html` in a browser. Click a carton, click the bay, `R` to yaw, Backspace to undo. **Pack for me** runs a greedy skyline fill — the same idea as the optimiser, not a formula.
+
+Three bays: a van (cube-out), a 16 ft box (weight-out), a 26 ft box (axle). Space and payload race. One of them wins.
 
 ## Features
 

@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1A1612">
+<title>Load Bay</title>
+<meta name="description" content="Play Load Bay: cube-out or weight-out. Pack a truck by hand. The binding constraint is the score.">
+<meta property="og:title" content="Load Bay">
+<meta property="og:description" content="Space and payload race. One of them wins. Load the bay and find out which.">
+<meta name="twitter:card" content="summary">
+<style>
+:root{
+  --ink:#F6F0E6; --mid:#C9BBA8; --dim:#8A7C6C;
+  --cube:#5EE0D0; --wt:#E8A317; --good:#7BE38A; --bad:#E85D5D;
+  --panel:rgba(18,14,10,.78); --line:#3A3228;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#1A1612;color:var(--ink);
+  font-family:ui-rounded,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+canvas#world{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.hud-top,.hud-bot{
+  position:fixed;left:0;right:0;z-index:2;pointer-events:none;
+  padding-left:max(16px,env(safe-area-inset-left));
+  padding-right:max(16px,env(safe-area-inset-right));
+}
+.hud-top{top:0;padding-top:max(12px,env(safe-area-inset-top));
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.hud-bot{bottom:0;padding-bottom:max(14px,env(safe-area-inset-bottom));
+  display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.brand h1{margin:0;font-size:clamp(22px,4vw,34px);font-weight:800;line-height:1;letter-spacing:-.03em}
+.brand h1 span:first-child{color:var(--cube)} .brand h1 span:last-child{color:var(--wt)}
+.brand p{margin:6px 0 0;color:var(--mid);font-size:13px;max-width:34ch}
+.cluster{display:flex;flex-wrap:wrap;gap:6px;pointer-events:auto}
+.chip,.key{
+  pointer-events:auto;border:1px solid var(--line);background:var(--panel);
+  color:var(--ink);border-radius:10px;padding:7px 10px;font:600 13px/1 inherit;cursor:pointer}
+.chip[aria-current="true"]{border-color:var(--wt);color:var(--wt)}
+.key:disabled{opacity:.35;cursor:default}
+.key.cube{border-color:#2A6;color:var(--cube)}
+.key.wt{border-color:#A70;color:var(--wt)}
+.bars{pointer-events:none;min-width:min(420px,92vw)}
+.bar-row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.bar-row span{width:64px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.track{flex:1;height:12px;border-radius:99px;background:#2A241C;overflow:hidden;border:1px solid var(--line)}
+.track>i{display:block;height:100%;width:0;border-radius:99px;transition:width .25s ease}
+.track.cube>i{background:var(--cube)} .track.wt>i{background:var(--wt)}
+.bar-row em{font-style:normal;font-size:12px;width:52px;text-align:right;color:var(--mid)}
+.bind{margin-top:4px;font-size:13px;color:var(--wt);font-weight:700}
+.ax{margin-top:8px}
+.ax .rail{position:relative;height:10px;border-radius:99px;background:#2A241C;border:1px solid var(--line)}
+.ax .zone{position:absolute;left:32%;width:36%;top:0;bottom:0;background:rgba(123,227,138,.18);border-left:1px dashed var(--good);border-right:1px dashed var(--good)}
+.ax .mark{position:absolute;top:-4px;width:4px;height:18px;background:var(--ink);border-radius:2px;transform:translateX(-2px)}
+.ax small{display:block;margin-top:4px;color:var(--dim);font-size:11px}
+.dock{pointer-events:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.sku{
+  width:86px;border:1px solid var(--line);background:var(--panel);border-radius:12px;
+  padding:8px 8px 10px;cursor:pointer;text-align:left;color:inherit}
+.sku[aria-pressed="true"]{border-color:var(--cube);box-shadow:0 0 0 1px var(--cube)}
+.sku .sw{height:10px;border-radius:4px;margin-bottom:6px}
+.sku b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.sku i{font-style:normal;color:var(--dim);font-size:11px}
+.peek{
+  pointer-events:auto;position:fixed;right:0;top:38%;z-index:3;
+  writing-mode:vertical-rl;transform:rotate(180deg);
+  background:var(--panel);border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;
+  padding:14px 8px;color:var(--wt);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:11px;cursor:pointer}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;width:min(420px,100%);z-index:5;
+  background:#161210;border-left:1px solid var(--line);transform:translateX(104%);
+  transition:transform .28s ease;overflow:auto;padding:22px 22px 40px}
+.drawer.open{transform:none}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:4;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer h2{margin:8px 0 10px;font-size:22px}
+.drawer p,.drawer li{color:var(--mid);font-size:15px;line-height:1.55}
+.x{float:right;background:none;border:0;color:var(--ink);font-size:22px;cursor:pointer}
+.ov{
+  position:fixed;inset:0;z-index:6;display:none;align-items:center;justify-content:center;
+  background:rgba(10,8,6,.72);padding:24px}
+.ov.show{display:flex}
+.ov .card{background:#1E1914;border:1px solid var(--line);border-radius:18px;padding:28px;max-width:440px}
+.ov h2{margin:0 0 8px;font-size:28px}
+.ov p{color:var(--mid);margin:0 0 16px}
+.status{position:fixed;left:50%;bottom:108px;transform:translateX(-50%);z-index:2;
+  color:var(--mid);font-size:13px;pointer-events:none;text-align:center;text-shadow:0 1px 8px #000}
+@media (max-width:720px){
+  .brand p{display:none}
+  .sku{width:72px}
+}
+</style>
+</head>
+<body>
+<canvas id="world"></canvas>
+<div class="hud-top">
+  <div class="brand">
+    <h1><span>Load</span> · <span>Bay</span></h1>
+    <p>Space and payload race. Pack the truck. One of them wins.</p>
+  </div>
+  <div class="cluster" id="stages"></div>
+</div>
+<div class="hud-bot">
+  <div class="bars">
+    <div class="bar-row"><span>Cube</span><div class="track cube"><i id="cubeFill"></i></div><em id="cubePct">0%</em></div>
+    <div class="bar-row"><span>Weight</span><div class="track wt"><i id="wtFill"></i></div><em id="wtPct">0%</em></div>
+    <div class="bind" id="bind">Empty bay — nothing binds yet</div>
+    <div class="ax">
+      <div class="rail"><div class="zone"></div><div class="mark" id="cgMark"></div></div>
+      <small id="axMsg">Axle · keep the diamond in the green</small>
+    </div>
+  </div>
+  <div class="dock" id="dock"></div>
+  <div class="cluster">
+    <button class="key" id="rot" type="button">R rotate</button>
+    <button class="key" id="undo" type="button">⌫ Undo</button>
+    <button class="key" id="auto" type="button">Pack for me</button>
+    <button class="key" id="reset" type="button">↺</button>
+  </div>
+</div>
+<button class="peek" id="peek" type="button" aria-expanded="false">The loader</button>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button class="x" id="close" type="button" aria-label="Close">×</button>
+  <p style="color:var(--wt);letter-spacing:.14em;text-transform:uppercase;font-size:11px;font-weight:800">The loader</p>
+  <h2>Cube-out or weight-out.</h2>
+  <p>Every truck has two tanks. One is cubic metres. One is kilograms. You never fill both. The first one to hit the wall is the <b style="color:var(--ink)">binding constraint</b>.</p>
+  <p>Light, bulky freight cubes-out — the bay is full and the payload is still hungry. Dense freight weights-out — the springs are at the limit and you can still see floor.</p>
+  <p>That is this game. Same numbers the Python tool uses. No client catalogue. No formula on a slide. You feel which wall you hit.</p>
+  <h2>Axle</h2>
+  <p>Too much at the door and the steer axle gets light. The truck still has room. It will not want to turn. Keep the diamond in the green — that is the cargo’s centre of gravity along the bed.</p>
+  <h2>How to load</h2>
+  <p>Click a carton on the dock, aim at the bay, click to set it down. <b style="color:var(--ink)">R</b> yaws it 90°. Nothing floats: every cell needs floor or another carton under it. <b style="color:var(--ink)">Pack for me</b> is the skyline packer — the same idea as the optimiser, greedy and honest, not magic.</p>
+</aside>
+<div class="ov" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">Sealed</h2>
+    <p id="ovBody"></p>
+    <div class="cluster">
+      <button class="key cube" id="ovNext" type="button">Next bay</button>
+      <button class="key" id="ovRetry" type="button">Load it again</button>
+    </div>
+  </div>
+</div>
+<div class="status" id="status">Pick a carton. Set it on the floor of the bay.</div>
+<script>
+(function(){
+const HW0=22, HH0=11, HZ0=16;
+let HW=22, HH=11, HZ=16;
+const STAGES=[
+  {id:"van", name:"Van", L:5, W:3, H:3, payload:420,
+   dock:[
+     {label:"parcel", l:1,w:1,h:1, kg:6, n:16, color:[0.77,0.65,0.45]},
+     {label:"flat",   l:2,w:1,h:2, kg:9, n:6,  color:[0.55,0.38,0.16]},
+     {label:"retail", l:1,w:1,h:2, kg:8, n:6,  color:[0.72,0.70,0.62]}
+   ]},
+  {id:"box16", name:"16 ft", L:6, W:4, H:4, payload:520,
+   dock:[
+     {label:"fridge", l:2,w:2,h:2, kg:140, n:5, color:[0.28,0.18,0.10]},
+     {label:"micro",  l:1,w:1,h:1, kg:18,  n:8, color:[0.46,0.30,0.16]},
+     {label:"parcel", l:1,w:1,h:1, kg:7,   n:10,color:[0.77,0.65,0.45]}
+   ]},
+  {id:"box26", name:"26 ft", L:8, W:4, H:4, payload:860,
+   dock:[
+     {label:"engine", l:2,w:2,h:1, kg:95, n:6, color:[0.22,0.28,0.38]},
+     {label:"long",   l:3,w:1,h:1, kg:22, n:6, color:[0.42,0.26,0.12]},
+     {label:"parcel", l:1,w:1,h:1, kg:8,  n:18,color:[0.77,0.65,0.45]},
+     {label:"retail", l:1,w:1,h:2, kg:14, n:8, color:[0.72,0.70,0.62]}
+   ]}
+];
+
+const cvs=document.getElementById("world");
+const ctx=cvs.getContext("2d");
+let W=0,H=0,dpr=1, OX=0, OY=0;
+let S, occ, placed, dock, hold=null, yaw=0, ghost=null, hover=null;
+let history=[], overlay=null, soundOn=true, packing=false;
+
+function vol(){return S.L*S.W*S.H}
+function usedVol(){return placed.reduce((a,p)=>a+p.l*p.w*p.h,0)}
+function usedKg(){return placed.reduce((a,p)=>a+p.kg,0)}
+function cubePct(){return vol()? usedVol()/vol() : 0}
+function wtPct(){return S.payload? usedKg()/S.payload : 0}
+function binding(){
+  const c=cubePct(), w=wtPct();
+  if(usedVol()===0) return "empty";
+  if(Math.abs(c-w)<0.08) return "even";
+  return c>w ? "cube" : "weight";
+}
+function cg(){
+  const k=usedKg(); if(k<=0) return 0.5;
+  let m=0;
+  for(const p of placed) m += (p.x + p.l/2) * p.kg;
+  return (m/k)/S.L;
+}
+function axleOk(){ const c=cg(); return c>=0.32 && c<=0.68; }
+
+function rgb(c,m=1){return `rgb(${c[0]*m*255|0},${c[1]*m*255|0},${c[2]*m*255|0})`}
+function key(x,y,z){return x+","+y+","+z}
+function inB(x,y,z){return x>=0&&y>=0&&z>=0&&x<S.L&&y<S.W&&z<S.H}
+function dims(box){return yaw? {l:box.w, w:box.l, h:box.h} : {l:box.l, w:box.w, h:box.h}}
+
+function footprintClear(x,y,z,l,w,h){
+  for(let i=0;i<l;i++) for(let j=0;j<w;j++) for(let k=0;k<h;k++){
+    const X=x+i,Y=y+j,Z=z+k;
+    if(!inB(X,Y,Z) || occ.has(key(X,Y,Z))) return false;
+  }
+  if(z===0) return true;
+  for(let i=0;i<l;i++) for(let j=0;j<w;j++){
+    if(!occ.has(key(x+i,y+j,z-1))) return false;
+  }
+  return true;
+}
+function dropZ(x,y,l,w,h){
+  for(let z=S.H-h; z>=0; z--){
+    if(footprintClear(x,y,z,l,w,h)) return z;
+  }
+  return -1;
+}
+function canWeight(kg){return usedKg()+kg <= S.payload+1e-6}
+
+function occupy(p, add){
+  for(let i=0;i<p.l;i++) for(let j=0;j<p.w;j++) for(let k=0;k<p.h;k++){
+    const kstr=key(p.x+i,p.y+j,p.z+k);
+    if(add) occ.add(kstr); else occ.delete(kstr);
+  }
+}
+
+function iso(x,y,z){return [OX+(x-y)*HW, OY+(x+y)*HH - z*HZ]}
+function face(pts, fill, stroke){
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=1; ctx.stroke(); }
+}
+function drawBox(x,y,z,l,w,h,color,alpha=1){
+  ctx.save(); ctx.globalAlpha=alpha;
+  const t=(a,b,c)=>iso(a,b,c);
+  face([t(x,y,z+h),t(x+l,y,z+h),t(x+l,y+w,z+h),t(x,y+w,z+h)], rgb(color,1.05), "rgba(0,0,0,.25)");
+  face([t(x,y+w,z),t(x+l,y+w,z),t(x+l,y+w,z+h),t(x,y+w,z+h)], rgb(color,.55));
+  face([t(x+l,y,z),t(x+l,y+w,z),t(x+l,y+w,z+h),t(x+l,y,z+h)], rgb(color,.78));
+  ctx.restore();
+}
+function drawTruck(){
+  // floor — high contrast so the bay reads as a bay
+  for(let x=0;x<S.L;x++) for(let y=0;y<S.W;y++){
+    const t=(a,b)=>iso(a,b,0);
+    const shade=((x+y)%2)? "rgba(196,160,96,.55)" : "rgba(140,110,70,.5)";
+    face([t(x,y),t(x+1,y),t(x+1,y+1),t(x,y+1)], shade, "rgba(40,28,16,.55)");
+  }
+  // steel walls
+  drawBox(-0.22, -0.14, 0, 0.22, S.W+0.28, S.H+0.2, [0.42,0.46,0.52], .98);
+  drawBox(0, -0.16, 0, S.L, 0.16, S.H*0.72, [0.38,0.42,0.48], .88);
+  drawBox(0, S.W, 0, S.L, 0.16, S.H*0.42, [0.38,0.42,0.48], .55);
+  // rear door posts
+  drawBox(S.L, -0.16, 0, 0.14, 0.18, S.H+0.1, [0.85,0.62,0.18], .95);
+  drawBox(S.L, S.W-0.02, 0, 0.14, 0.18, S.H+0.1, [0.85,0.62,0.18], .95);
+}
+
+function resize(){
+  dpr=Math.min(2, window.devicePixelRatio||1);
+  W=cvs.clientWidth=window.innerWidth;
+  H=cvs.clientHeight=window.innerHeight;
+  cvs.width=W*dpr; cvs.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  layout();
+}
+function layout(){
+  if(!S) return;
+  const span=S.L+S.W+1.5;
+  HW=Math.max(16, Math.min(42, (Math.min(W*0.72, H*0.85))/span));
+  HH=HW*0.5;
+  HZ=HW*0.72;
+  OX=W*0.52;
+  OY=H*0.40;
+}
+
+function pickCell(mx,my){
+  const lx=mx-OX, ly=my-OY;
+  const x=(lx/HW + ly/HH)/2;
+  const y=(ly/HH - lx/HW)/2;
+  return {x:Math.floor(x+1e-6), y:Math.floor(y+1e-6)};
+}
+
+function placeAt(x,y){
+  if(!hold) return false;
+  const d=dims(hold);
+  if(x<0||y<0||x+d.l>S.L||y+d.w>S.W) return false;
+  if(!canWeight(hold.kg)) return false;
+  const z=dropZ(x,y,d.l,d.w,d.h);
+  if(z<0) return false;
+  const p={x,y,z,l:d.l,w:d.w,h:d.h,kg:hold.kg,color:hold.color,label:hold.label};
+  placed.push(p); occupy(p,true);
+  history.push({p, label:hold.label});
+  const sku=dock.find(s=>s.label===hold.label);
+  sku.n--;
+  if(sku.n<=0) hold=null;
+  tick(); thunk(220);
+  return true;
+}
+
+function undo(){
+  const h=history.pop(); if(!h) return;
+  occupy(h.p,false);
+  placed=placed.filter(p=>p!==h.p);
+  const sku=dock.find(s=>s.label===h.label); if(sku) sku.n++;
+  tick();
+}
+
+function autoPack(){
+  packing=true;
+  while(dock.some(s=>s.n>0)){
+    let best=null;
+    for(const box of dock){
+      if(!box.n || !canWeight(box.kg)) continue;
+      for(const r of [0,1]){
+        const l=r?box.w:box.l, w=r?box.l:box.w, h=box.h;
+        for(let x=0;x<=S.L-l;x++) for(let y=0;y<=S.W-w;y++){
+          const z=dropZ(x,y,l,w,h);
+          if(z<0) continue;
+          const score=z*100 + x*2 + y;
+          if(!best || score<best.s) best={s:score,x,y,r,box};
+        }
+      }
+    }
+    if(!best) break;
+    yaw=best.r;
+    hold={...best.box};
+    if(!placeAt(best.x,best.y)) break;
+  }
+  yaw=0; hold=null; packing=false; tick();
+}
+
+function stuck(){
+  if(!dock.some(s=>s.n>0)) return false;
+  for(const s of dock){
+    if(!s.n) continue;
+    if(!canWeight(s.kg)) continue;
+    for(const r of [0,1]){
+      const l=r?s.w:s.l, w=r?s.l:s.w;
+      for(let x=0;x<=S.L-l;x++) for(let y=0;y<=S.W-w;y++){
+        if(dropZ(x,y,l,w,s.h)>=0) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function thunk(f){
+  if(!soundOn) return;
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(), g=ac.createGain();
+    o.frequency.value=f; g.gain.value=0.04;
+    o.connect(g); g.connect(ac.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.09);
+    o.stop(ac.currentTime+0.1);
+  }catch(e){}
+}
+
+function setStage(i){
+  S=JSON.parse(JSON.stringify(STAGES[i]));
+  S.index=i;
+  occ=new Set(); placed=[]; history=[]; hold=null; yaw=0; ghost=null; overlay=null;
+  dock=S.dock.map(s=>({...s}));
+  layout();
+  document.getElementById("ov").classList.remove("show");
+  tick();
+}
+
+function tick(){
+  renderDock(); renderStages(); renderBars(); maybeOverlay();
+  const b=binding();
+  const msg={
+    empty:"Pick a carton. Set it on the floor of the bay.",
+    cube:"Cubing out — space is the wall.",
+    weight:"Weighting out — payload is the wall.",
+    even:"Volume and weight climbing together."
+  }[b];
+  const ax=axleOk()?"":(usedKg()? " · axle is off — shift toward the headboard" : "");
+  document.getElementById("status").textContent=(hold? "Aim at the bay, click to drop. R to yaw." : msg)+ax;
+  document.getElementById("undo").disabled=!history.length;
+}
+
+function renderBars(){
+  const c=Math.min(1,cubePct()), w=Math.min(1,wtPct());
+  document.getElementById("cubeFill").style.width=(c*100).toFixed(1)+"%";
+  document.getElementById("wtFill").style.width=(w*100).toFixed(1)+"%";
+  document.getElementById("cubePct").textContent=Math.round(c*100)+"%";
+  document.getElementById("wtPct").textContent=Math.round(w*100)+"%";
+  const b=binding();
+  document.getElementById("bind").textContent=
+    b==="empty"?"Empty bay — nothing binds yet":
+    b==="cube"?"Binding: cube-out":
+    b==="weight"?"Binding: weight-out":
+    "Binding: even — rare, and beautiful";
+  const cgv=cg();
+  document.getElementById("cgMark").style.left=(cgv*100)+"%";
+  document.getElementById("cgMark").style.background=axleOk()? "var(--ink)" : "var(--bad)";
+  document.getElementById("axMsg").textContent=
+    usedKg()===0?"Axle · keep the diamond in the green":
+    axleOk()?`Axle · CG ${Math.round(cgv*100)}% along the bed — balanced`:
+    `Axle · CG ${Math.round(cgv*100)}% — too far ${cgv>0.5?"aft":"forward"}`;
+}
+
+function renderStages(){
+  const el=document.getElementById("stages");
+  el.innerHTML="";
+  STAGES.forEach((st,i)=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.type="button";
+    b.textContent=st.name;
+    if(S.index===i) b.setAttribute("aria-current","true");
+    b.onclick=()=>setStage(i);
+    el.appendChild(b);
+  });
+}
+
+function renderDock(){
+  const el=document.getElementById("dock");
+  el.innerHTML="";
+  dock.forEach(s=>{
+    if(s.n<=0) return;
+    const b=document.createElement("button");
+    b.className="sku"; b.type="button";
+    b.setAttribute("aria-pressed", hold&&hold.label===s.label ? "true":"false");
+    b.innerHTML=`<div class="sw" style="background:${rgb(s.color)}"></div><b>${s.label}</b><i>${s.l}×${s.w}×${s.h} · ${s.kg}kg · ×${s.n}</i>`;
+    b.onclick=()=>{ hold={...s}; tick(); };
+    el.appendChild(b);
+  });
+}
+
+function maybeOverlay(){
+  if(packing) return;
+  const empty=!dock.some(s=>s.n>0);
+  if(empty || stuck()){
+    if(overlay) return;
+    const b=binding();
+    const title=empty? (axleOk()?"Sealed.":"Sealed — axle is light.") :
+      (b==="weight"?"Weight-out.":"Cube-out.");
+    const left=dock.reduce((a,s)=>a+s.n,0);
+    const body=empty
+      ? `Cube ${Math.round(cubePct()*100)}% · payload ${Math.round(wtPct()*100)}%. ${b==="cube"?"Space hit first.":b==="weight"?"Kilograms hit first.":"Both climbed together."}`
+      : `${left} carton${left===1?"":"s"} still on the dock. ${b==="weight"?"The springs took the last kilogram.":"The bay has holes, but nothing else fits — that is still cube-out."}`;
+    overlay={title, body};
+    document.getElementById("ovTitle").textContent=title;
+    document.getElementById("ovBody").textContent=body;
+    document.getElementById("ov").classList.add("show");
+    document.getElementById("ovNext").style.display=S.index<STAGES.length-1?"":"none";
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#241C14"); g.addColorStop(1,"#0E0C0A");
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="rgba(232,163,23,.05)";
+  ctx.beginPath(); ctx.ellipse(W*0.55,H*0.2,220,80,0,0,6.28); ctx.fill();
+  drawTruck();
+  const boxes=[...placed].sort((a,b)=>(a.x+a.y+a.z)-(b.x+b.y+b.z));
+  for(const p of boxes) drawBox(p.x,p.y,p.z,p.l,p.w,p.h,p.color);
+  if(hold && ghost){
+    const d=dims(hold);
+    const ok=ghost.z>=0 && canWeight(hold.kg);
+    drawBox(ghost.x,ghost.y,Math.max(0,ghost.z),d.l,d.w,d.h,hold.color, ok?0.55:0.22);
+  }
+  requestAnimationFrame(draw);
+}
+
+function onMove(e){
+  const r=cvs.getBoundingClientRect();
+  const mx=(e.touches?e.touches[0].clientX:e.clientX)-r.left;
+  const my=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+  hover=pickCell(mx,my);
+  if(!hold){ ghost=null; return; }
+  const d=dims(hold);
+  let x=Math.max(0, Math.min(S.L-d.l, hover.x));
+  let y=Math.max(0, Math.min(S.W-d.w, hover.y));
+  ghost={x,y,z:dropZ(x,y,d.l,d.w,d.h)};
+}
+function onDown(e){
+  if(!hold) return;
+  const r=cvs.getBoundingClientRect();
+  const mx=(e.changedTouches?e.changedTouches[0].clientX:e.clientX)-r.left;
+  const my=(e.changedTouches?e.changedTouches[0].clientY:e.clientY)-r.top;
+  const c=pickCell(mx,my);
+  const d=dims(hold);
+  const x=Math.max(0, Math.min(S.L-d.l, c.x));
+  const y=Math.max(0, Math.min(S.W-d.w, c.y));
+  placeAt(x,y);
+}
+
+cvs.addEventListener("pointermove", onMove);
+cvs.addEventListener("pointerdown", onDown);
+window.addEventListener("resize", resize);
+document.getElementById("rot").onclick=()=>{ yaw^=1; if(hover&&hold){
+  const d=dims(hold);
+  ghost={x:Math.max(0,Math.min(S.L-d.l,hover.x)), y:Math.max(0,Math.min(S.W-d.w,hover.y)),
+         z:dropZ(Math.max(0,Math.min(S.L-d.l,hover.x)), Math.max(0,Math.min(S.W-d.w,hover.y)), d.l,d.w,d.h)};
+}};
+document.getElementById("undo").onclick=undo;
+document.getElementById("auto").onclick=autoPack;
+document.getElementById("reset").onclick=()=>setStage(S.index);
+document.getElementById("ovRetry").onclick=()=>setStage(S.index);
+document.getElementById("ovNext").onclick=()=>setStage(Math.min(STAGES.length-1,S.index+1));
+
+const drawer=document.getElementById("drawer");
+const scrim=document.getElementById("scrim");
+function openD(on){
+  drawer.classList.toggle("open",on);
+  scrim.classList.toggle("on",on);
+  drawer.setAttribute("aria-hidden", on?"false":"true");
+  document.getElementById("peek").setAttribute("aria-expanded", on?"true":"false");
+}
+document.getElementById("peek").onclick=()=>openD(!drawer.classList.contains("open"));
+document.getElementById("close").onclick=()=>openD(false);
+scrim.onclick=()=>openD(false);
+window.addEventListener("keydown", e=>{
+  if(e.key==="Escape"){ openD(false); hold=null; tick(); }
+  if(e.key==="?" || e.key==="/"){ e.preventDefault(); openD(!drawer.classList.contains("open")); }
+  if(e.key==="r"||e.key==="R") document.getElementById("rot").click();
+  if(e.key==="Backspace"){ e.preventDefault(); undo(); }
+  if(e.key==="Enter") autoPack();
+});
+
+resize();
+setStage(0);
+draw();
+})();
+</script>
+</body>
+</html>
