@@ -11,7 +11,7 @@ Design goals
 * A declarative `build_from_spec()` so cheaper/local models can drive it too.
 
 Usage inside Blender's Python (via the MCP execute_blender_code tool):
-    import sys; sys.path.insert(0, "/Users/amitendrasinghthenua/blender-mcp/photoreal")
+    import sys; sys.path.insert(0, "/path/to/this/repo")
     import importlib, scene_kit; importlib.reload(scene_kit)
     scene_kit.setup_render(quality="balanced", resolution=(1600,1600))
 """
